@@ -1,0 +1,94 @@
+name: "Terraform CI/CD Workflow"
+
+on:
+  push:
+    branches:
+      - main  # Trigger on changes to main branch
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.TENANT_ID }}
+  ROOT_PATH: ${{ github.workspace }}/environments/dev
+
+jobs:
+  terraform-deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: List Files in Workspace
+        run: ls -R
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+        #run: terraform init -backend-config=environments/dev/dev.auto.tfvars
+        working-directory: ${{ env.ROOT_PATH }}
+
+      - name: Terraform Format
+        run: terraform fmt
+        working-directory: ${{ env.ROOT_PATH }}
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ${{ env.ROOT_PATH }}
+      
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: "latest"  # Use the latest version of TFLint
+      
+      - name: Run TFLint
+        run: |
+            echo "Running TFLint..."
+            tflint > tflint-report.txt 2>&1 || echo "TFLint found issues."
+            echo "TFLint output saved to tflint-report.txt"
+            echo "=== TFLint Output ==="
+            cat tflint-report.txt
+        working-directory: ${{ env.ROOT_PATH }}
+
+
+      - name: Install tfsec
+        run: |
+          mkdir -p $HOME/.local/bin
+          curl -L https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o $HOME/.local/bin/tfsec
+          chmod +x $HOME/.local/bin/tfsec
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        
+      - name: Run tfsec Security Scan
+        run: |
+            tfsec --concise-output --soft-fail \
+                  --format json --out tfsec-report.json
+            tfsec --concise-output --soft-fail
+        working-directory: ${{ env.ROOT_PATH }}
+
+      - name: Upload TFSEC Report
+        uses: actions/upload-artifact@v3
+        with:
+            name: tfsec-report
+            path: ${{ env.ROOT_PATH }}/tfsec-report.json
+
+      - name: Terraform Plan
+        run: terraform plan 
+        #run: terraform plan -var-file=environments/dev/dev.auto.tfvars
+        working-directory: ${{ env.ROOT_PATH }}
+
+      # - name: Terraform Apply
+      #   run: terraform apply -auto-approve
+      #   #run: terraform apply -auto-approve -var-file=environments/dev/dev.auto.tfvars
+      #   working-directory: ${{ env.ROOT_PATH }}
+
+      # - name: Terraform Output
+      #   run: terraform output
+      #   working-directory: ${{ env.ROOT_PATH }}
+
+      # - name: Terraform Destroy
+      #   run: terraform destroy -auto-approve
+      #   working-directory: ${{ env.ROOT_PATH }}
+    
